@@ -1,0 +1,23 @@
+# Financial Sentiment Analysis — Dependencies
+# Getestet mit Python 3.10+ / Python 3.12
+#
+# Installation:
+#   pip install -r requirements.txt
+#
+# NLTK-Ressource nach Installation einmalig herunterladen:
+#   python -c "import nltk; nltk.download('vader_lexicon')"
+
+# NLP & Machine Learning
+scikit-learn>=1.3.0
+nltk>=3.8.0
+
+# Numerik & Daten
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Visualisierung
+matplotlib>=3.7.0
+
+# Optional: Originaldatensatz von Hugging Face laden
+# (offline-fähige eingebettete Version ist Standard)
+# datasets>=2.14.0

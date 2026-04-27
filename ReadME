@@ -1,0 +1,169 @@
+# Financial Sentiment Analysis
+**NLP-basierter Sentiment-Klassifikator für Finanztexte**  
+VADER (regelbasiert) vs. TF-IDF + Logistic Regression (supervised) — mit 4-Panel-Dashboard
+
+
+---
+
+## Überblick
+
+Dieses Projekt implementiert zwei Sentiment-Klassifikatoren für Finanztexte und vergleicht sie systematisch:
+
+| Modell | Typ | Training erforderlich | Stärke |
+|---|---|---|---|
+| VADER | Regelbasiert (Lexikon) | Nein | Robust bei unbekannten Sätzen, erklärbarer Score |
+| TF-IDF + LogReg | Supervised ML | Ja | Lernt Finanzkontext; skaliert mit mehr Daten |
+
+**Datensatz:** Financial PhraseBank (Malo et al. 2014) — Finanznachrichten und Analystenberichte, manuell gelabelt in `negative / neutral / positive`. Das Projekt enthält eine eingebettete, offline-fähige Stichprobe des Datensatzes; mit dem echten Financial PhraseBank (~2260 Sätze via Hugging Face) steigt die LR-Accuracy typischerweise auf 70–75%.
+
+---
+
+## Projektstruktur
+
+```
+financial-sentiment/
+├── financial_sentiment_model.py    # Kernmodul: Modelle, Training, Evaluation
+├── run_sentiment_dashboard.py      # Ausführungslogik: Dashboard-Generierung
+├── requirements.txt                # Abhängigkeiten
+└── README.md                       # Diese Datei
+```
+
+**Designprinzip:** Kernlogik strikt getrennt von Ausführungslogik — analog zum RiskMetrics EWMA-System. `financial_sentiment_model.py` ist importierbar ohne Seiteneffekte.
+
+---
+
+## Schnellstart
+
+```bash
+# 1. Abhängigkeiten installieren
+pip install -r requirements.txt
+
+# 2. NLTK-Ressource herunterladen (einmalig)
+python -c "import nltk; nltk.download('vader_lexicon')"
+
+# 3. Dashboard generieren
+python run_sentiment_dashboard.py
+```
+
+Das Dashboard wird als `financial_sentiment_dashboard.png` gespeichert.
+
+---
+
+## Methodik
+
+### VADER (Valence Aware Dictionary and sEntiment Reasoner)
+
+Regelbasiertes Modell mit finanzangereichtem Lexikon. Berechnet einen Compound Score ∈ [−1, 1]:
+
+```
+compound = Σ(adjusted word scores) / √(Σ(adjusted word scores)² + α)
+```
+
+Klassifikation nach Schwellwerten (Hutto & Gilbert 2014):
+
+```
+compound ≥  0.05  →  positive
+compound ≤ −0.05  →  negative
+sonst             →  neutral
+```
+
+**Stärke:** Funktioniert ohne Training. Erkennt Intensifikatoren (`strongly`, `sharply`) und Negationen (`not improved`).  
+**Schwäche:** Blind für Finanzkontext — `headwinds` ist im allgemeinen Lexikon neutral, im Finanzkontext negativ.
+
+### TF-IDF + Logistic Regression
+
+Supervised Klassifikator. TF-IDF wandelt jeden Satz in einen gewichteten Merkmalsvektor um:
+
+```
+TF-IDF(t, d) = TF(t, d) · log(N / df(t))
+```
+
+Logistic Regression (Softmax für 3 Klassen) lernt Gewichte pro Klasse:
+
+```
+P(y=k | x) = exp(w_k · x) / Σ_j exp(w_j · x)
+```
+
+**Konfiguration:**
+- `max_features = 5000` (Vokabular-Obergrenze)
+- `ngram_range = (1, 2)` — Bigramme erfassen `"net loss"`, `"operating profit"` als Einheit
+- `sublinear_tf = True` — log(1+TF) dämpft sehr häufige Terme
+
+**Stärke:** Lernt domänenspezifische Terme aus dem Trainingsdatensatz.  
+**Schwäche:** Braucht ausreichend Trainingsdaten — bei n < 200 übertrifft VADER oft.
+
+### Warum VADER bei kleinem Datensatz gewinnt
+
+TF-IDF erzeugt einen Vektorraum mit bis zu 5000 Dimensionen. Mit nur 50 Trainingsbeispielen ist die Stichprobe zu dünn für zuverlässige Gewichte — das Modell fällt auf die Majority Class zurück. Mit dem vollen Financial PhraseBank (~1800 Trainingsbeispiele) dreht sich das Bild: LR schlägt VADER durch Finanz-Kontextwissen.
+
+---
+
+## Dashboard — 4 Panels
+
+| Panel | Inhalt |
+|---|---|
+| 1 — Class Distribution | Balkendiagramm: True Labels vs. VADER vs. LR-Vorhersagen |
+| 2 — Model Comparison | Accuracy und Macro-F1 beider Modelle, Majority-Class-Baseline |
+| 3a/3b — Confusion Matrices | Normierte Heatmaps für VADER und LR |
+| 4 — Sentiment Time Series | Sentiment-Verlauf über alle Samples (sortiert nach True Label) |
+
+---
+
+## Metriken
+
+**Accuracy:** Anteil korrekt klassifizierter Samples.
+
+**Macro-F1:** Ungewichteter Mittelwert der F1-Scores pro Klasse — bevorzugt bei class-imbalanced Datensätzen (hier: ~59% positive, ~28% neutral, ~13% negative).
+
+**Majority-Class-Baseline:** Ein trivialer Klassifikator, der immer `positive` vorhersagt, erreicht ~59% Accuracy. Jedes Modell muss diese Schwelle deutlich überschreiten.
+
+---
+
+## Erweiterungen
+
+**Originaldatensatz laden** (Netzwerk erforderlich):
+
+```python
+from datasets import load_dataset
+ds = load_dataset("financial_phrasebank", "sentences_allagree")
+```
+
+Die Funktion `load_phrasebank()` in `financial_sentiment_model.py` kann direkt gegen diesen Datensatz ausgetauscht werden — gleiche Rückgabestruktur `(texts, labels)`.
+
+**Modell speichern und laden:**
+
+```python
+import joblib
+from sklearn.model_selection import train_test_split
+from financial_sentiment_model import load_phrasebank, build_lr_pipeline
+
+texts, labels = load_phrasebank()
+X_train, X_test, y_train, y_test = train_test_split(texts, labels, test_size=0.2, random_state=42)
+pipe = build_lr_pipeline()
+pipe.fit(X_train, y_train)
+joblib.dump(pipe, "sentiment_lr_pipeline.pkl")
+
+# Laden und inferieren
+pipe = joblib.load("sentiment_lr_pipeline.pkl")
+pipe.predict(["Operating profit rose to EUR 5 mn."])
+# → [2]  (positiv)
+```
+
+**Integration mit EWMA-Modell:** Der VADER Compound Score (kontinuierlich, ∈ [−1, 1]) kann als zusätzlicher Signalkanal neben der EWMA-Volatilität verwendet werden — z.B. als Sentiment-adjustiertes Risikomaß.
+
+---
+
+## Bekannte Einschränkungen
+
+- Eingebetteter Datensatz (n=63) ist für Lernzwecke dimensioniert, nicht für Produktivbetrieb.
+- Kein Stemming — bewusste Entscheidung: Finanzterme sind morphologisch sensitiv (`losses` und `loss` sind semantisch äquivalent, aber `write-off` und `write` nicht).
+- VADER-Lexikon muss bei Offline-Verwendung manuell bereitgestellt werden (siehe `nltk.download`).
+- Keine Backtesting-Funktion — bei Produktiveinsatz: zeitliche Train/Test-Splits verwenden (kein zufälliges Mischen, da Finanzdaten zeitabhängig sind).
+
+---
+
+## Referenzen
+
+- Malo, P. et al. (2014). *Good debt or bad debt: Detecting semantic orientations in economic texts.* Journal of the Association for Information Science and Technology.
+- Hutto, C.J. & Gilbert, E. (2014). *VADER: A Parsimonious Rule-based Model for Sentiment Analysis of Social Media Text.* ICWSM.
+- RiskMetrics Technical Document (1996) — Referenzrahmen für das übergeordnete EWMA-Projekt.
