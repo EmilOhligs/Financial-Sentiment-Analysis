@@ -3,17 +3,19 @@ financial_sentiment_model.py
 =============================
 Finanz-Sentiment-Klassifikator: VADER (regelbasiert) vs. TF-IDF + Logistic Regression (supervised).
 
-Datensatz: Financial PhraseBank (sentences_allagree) — hier als repräsentativer
-           synthetischer Datensatz mit identischer Satzstruktur und Label-Verteilung
-           eingebettet (offline-fähig; Struktur identisch mit Originaldatensatz).
-           Original: Malo et al. (2014), ~2260 Sätze, alle Annotatoren einig.
+Datensatz: Financial PhraseBank (Malo et al. 2014) — Finanznachrichten und Analystenberichte,
+           manuell gelabelt in negative / neutral / positive.
+
+           Zwei Modi über USE_HUGGINGFACE (siehe unten):
+           True  → echter Datensatz via Hugging Face (~2260 Sätze)
+           False → eingebetteter Fallback-Datensatz (63 Sätze, offline-fähig)
 
 Label-Mapping:  0 = negative  |  1 = neutral  |  2 = positive
 Verteilung:     ~13% neg  |  ~28% neu  |  ~59% pos  (orientiert am Original)
 
 Formel TF-IDF:
-    TF(t, d)  = Häufigkeit von Term t in Dokument d
-    IDF(t)    = log(N / df(t))   N = Anzahl Dokumente, df = Dokumente mit Term t
+    TF(t, d)    = Häufigkeit von Term t in Dokument d
+    IDF(t)      = log(N / df(t))   N = Anzahl Dokumente, df = Dokumente mit Term t
     TF-IDF(t,d) = TF(t,d) · IDF(t)
 
 Formel Logistic Regression (Softmax für 3 Klassen):
@@ -27,13 +29,10 @@ VADER Compound Score:
 
 Annahmen:
     - Sätze sind tokenisierbar mit Standard-Whitespace-Tokenisierung
-    - Keine Vorverarbeitung durch Stemming (Finanzterme sind morphologisch sensitiv:
-      "losses" ≠ "loss" im Finanzkontext hat ähnliche Bedeutung, aber Stemming
-      erzeugt Kollisionen mit anderen Termini)
-    - Log-Return-Renditen werden NICHT berechnet — rein NLP-Modul
+    - Kein Stemming (Finanzterme sind morphologisch sensitiv)
+    - Log-Return-Renditen werden nicht berechnet — rein NLP-Modul
 """
 
-import re
 import warnings
 import numpy as np
 from collections import Counter
@@ -51,33 +50,40 @@ from nltk.sentiment.vader import SentimentIntensityAnalyzer
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # ---------------------------------------------------------------------------
+# SWITCH: Datensatz-Quelle
+# ---------------------------------------------------------------------------
+# True  → Hugging Face datasets (pip install datasets erforderlich, Netzwerk)
+#         ~2260 Sätze — empfohlen für realistische Modellevaluation
+# False → eingebetteter Fallback-Datensatz (63 Sätze, offline, kein pip)
+#         geeignet für Offline-Entwicklung und schnelle Tests
+USE_HUGGINGFACE: bool = True
+
+# ---------------------------------------------------------------------------
 # Konstanten — alle benannt, keine hart codierten Magic Numbers
 # ---------------------------------------------------------------------------
 
 # VADER Schwellwerte (Hutto & Gilbert 2014, Tab. 5)
-VADER_POS_THRESHOLD: float = 0.05   # compound >= 0.05 → positiv
-VADER_NEG_THRESHOLD: float = -0.05  # compound <= -0.05 → negativ
+VADER_POS_THRESHOLD: float = 0.05
+VADER_NEG_THRESHOLD: float = -0.05
 
 # TF-IDF Parameter
-TFIDF_MAX_FEATURES: int = 5_000     # Vokabular-Obergrenze
-TFIDF_NGRAM_RANGE: Tuple[int, int] = (1, 2)  # Uni- und Bigramme
+TFIDF_MAX_FEATURES: int = 5_000
+TFIDF_NGRAM_RANGE: Tuple[int, int] = (1, 2)
 
 # Logistic Regression
-LR_MAX_ITER: int = 1_000            # Konvergenzgrenze
-LR_C: float = 1.0                   # Regularisierungsstärke (1/λ), C ∈ (0, ∞)
+LR_MAX_ITER: int = 1_000
+LR_C: float = 1.0
 
 # Train/Test Split
-TEST_SIZE: float = 0.20             # 80% Training, 20% Test
-RANDOM_STATE: int = 42              # Reproduzierbarkeit
+TEST_SIZE: float = 0.20
+RANDOM_STATE: int = 42
 
 # Label-Definitionen
 LABEL_NAMES: List[str] = ["negative", "neutral", "positive"]
 LABEL_MAP: Dict[str, int] = {"negative": 0, "neutral": 1, "positive": 2}
 
 # ---------------------------------------------------------------------------
-# Eingebetteter Datensatz (Financial PhraseBank — repräsentative Stichprobe)
-# Orientiert an Malo et al. (2014): Originalstruktur, Finanzterminologie,
-# Label-Verteilung ~59% pos / ~28% neu / ~13% neg
+# Eingebetteter Fallback-Datensatz (USE_HUGGINGFACE = False)
 # ---------------------------------------------------------------------------
 
 RAW_DATA: List[Tuple[str, str]] = [
@@ -155,7 +161,6 @@ RAW_DATA: List[Tuple[str, str]] = [
 # ---------------------------------------------------------------------------
 
 def _validate_texts(texts: List[str], name: str = "texts") -> None:
-    """Validiert Eingabeliste auf Typ, Länge und Inhalt."""
     if not isinstance(texts, list):
         raise TypeError(f"{name} muss eine Liste sein, erhalten: {type(texts)}")
     if len(texts) == 0:
@@ -168,13 +173,11 @@ def _validate_texts(texts: List[str], name: str = "texts") -> None:
 
 
 def _validate_labels(labels: List[int], name: str = "labels") -> None:
-    """Validiert Label-Array auf zulässige Werte {0, 1, 2}."""
     valid = {0, 1, 2}
     for i, lbl in enumerate(labels):
         if lbl not in valid:
             raise ValueError(
-                f"{name}[{i}] = {lbl} ist kein gültiges Label. "
-                f"Erlaubt: {valid}"
+                f"{name}[{i}] = {lbl} ist kein gültiges Label. Erlaubt: {valid}"
             )
 
 
@@ -184,26 +187,72 @@ def _validate_labels(labels: List[int], name: str = "labels") -> None:
 
 def load_phrasebank() -> Tuple[List[str], List[int]]:
     """
-    Gibt den eingebetteten Financial PhraseBank-Datensatz zurück.
+    Gibt den Financial PhraseBank-Datensatz zurück.
 
-    Returns:
-        texts  : Liste von Strings (Finanzsätze)
-        labels : Liste von int {0=neg, 1=neu, 2=pos}
+    Switch über USE_HUGGINGFACE am Anfang der Datei:
+        True  → _load_from_huggingface() — ~2260 Sätze, Netzwerk erforderlich
+        False → _load_fallback()         — 63 Sätze, offline
+
+    Rückgabe ist in beiden Fällen identisch:
+        texts  : List[str]
+        labels : List[int] {0=negative, 1=neutral, 2=positive}
     """
-    texts = [s for s, _ in RAW_DATA]
+    if USE_HUGGINGFACE:
+        return _load_from_huggingface()
+    else:
+        return _load_fallback()
+
+
+def _load_from_huggingface() -> Tuple[List[str], List[int]]:
+    """
+    Lädt Financial PhraseBank direkt als Parquet via pandas.
+    Umgeht das veraltete Script-Format — kein load_dataset() nötig.
+
+    Label-Mapping laut Datensatz-Dokumentation:
+        0 = negative  |  1 = neutral  |  2 = positive
+    """
+    try:
+        import pandas as pd
+        url = (
+            "https://huggingface.co/datasets/FinanceMTEB/financial_phrasebank"
+            "/resolve/main/data/train-00000-of-00001.parquet"
+            )
+        df = pd.read_parquet(url)
+        print("Spalten:", list(df.columns))
+        print("Erste Zeile:", df.iloc[0].to_dict())
+
+        if "text" not in df.columns or "label" not in df.columns:
+            raise RuntimeError(f"Unerwartete Spalten: {list(df.columns)}")
+
+        texts  = df["text"].tolist()
+        labels = df["label"].tolist()
+
+    except Exception as e:
+        raise RuntimeError(
+            f"Datensatz konnte nicht geladen werden: {e}\n"
+            f"Alternativ: USE_HUGGINGFACE = False setzen."
+        )
+
+    if len(texts) < 100:
+        raise RuntimeError(f"Datensatz zu klein: {len(texts)} Samples.")
+
+    dist = Counter(labels)
+    for k in [0, 1, 2]:
+        if dist[k] == 0:
+            raise RuntimeError(f"Klasse '{LABEL_NAMES[k]}' hat 0 Samples.")
+
+    return texts, labels
+
+
+def _load_fallback() -> Tuple[List[str], List[int]]:
+    """Eingebetteter Fallback-Datensatz (63 Sätze, offline)."""
+    texts  = [s for s, _ in RAW_DATA]
     labels = [LABEL_MAP[lbl] for _, lbl in RAW_DATA]
 
-    # Plausibilitätscheck: Label-Verteilung ausgeben
     dist = Counter(labels)
-    n = len(labels)
     for k, name in enumerate(LABEL_NAMES):
-        pct = 100 * dist[k] / n
-        # Erwartete Bereiche: neg ~5–20%, neu ~20–35%, pos ~50–70%
-        if not (0 < dist[k] < n):
-            raise RuntimeError(
-                f"Klasse '{name}' hat {dist[k]} Samples — "
-                f"Datensatz ist degeneriert."
-            )
+        if dist[k] == 0:
+            raise RuntimeError(f"Klasse '{name}' hat 0 Samples im Fallback.")
 
     return texts, labels
 
@@ -217,56 +266,37 @@ def vader_predict(texts: List[str]) -> List[int]:
     Regelbasierter Sentiment-Klassifikator via VADER.
 
     Formel Compound Score:
-        compound = Σ(adjusted word scores) / √(Σ(adjusted word scores)² + α)
-        α = 15 (Normalisierungskonstante, Hutto & Gilbert 2014)
+        compound = Σ(adjusted word scores) / √(Σ(adjusted word scores)² + 15)
 
-    Schwellwerte (Konstanten VADER_POS_THRESHOLD, VADER_NEG_THRESHOLD):
+    Schwellwerte:
         compound >= 0.05  → 2 (positiv)
         compound <= -0.05 → 0 (negativ)
         sonst             → 1 (neutral)
-
-    Parameter:
-        texts : List[str] — Eingabetexte, len >= 1
-
-    Returns:
-        preds : List[int] — Vorhersagen {0, 1, 2}
     """
     _validate_texts(texts)
 
-    sia = SentimentIntensityAnalyzer()
+    sia   = SentimentIntensityAnalyzer()
     preds = []
 
     for text in texts:
-        scores = sia.polarity_scores(text)
-        compound = scores["compound"]  # compound ∈ [-1, 1]
-
+        compound = sia.polarity_scores(text)["compound"]
         if compound >= VADER_POS_THRESHOLD:
-            preds.append(2)   # positiv
+            preds.append(2)
         elif compound <= VADER_NEG_THRESHOLD:
-            preds.append(0)   # negativ
+            preds.append(0)
         else:
-            preds.append(1)   # neutral
+            preds.append(1)
 
-    # Plausibilitätscheck: mindestens eine Klasse vertreten
     if len(set(preds)) < 2:
         raise RuntimeError(
-            f"VADER gibt nur Klasse {set(preds)} aus — "
-            f"Lexikon möglicherweise unvollständig."
+            f"VADER gibt nur Klasse {set(preds)} aus — Lexikon unvollständig?"
         )
 
     return preds
 
 
 def vader_compound_scores(texts: List[str]) -> List[float]:
-    """
-    Gibt rohe VADER Compound Scores zurück (für Zeitreihen-Visualisierung).
-
-    Parameter:
-        texts : List[str]
-
-    Returns:
-        scores : List[float], je ∈ [-1, 1]
-    """
+    """Rohe VADER Compound Scores ∈ [-1, 1] für Zeitreihen-Visualisierung."""
     _validate_texts(texts)
     sia = SentimentIntensityAnalyzer()
     return [sia.polarity_scores(t)["compound"] for t in texts]
@@ -278,25 +308,15 @@ def vader_compound_scores(texts: List[str]) -> List[float]:
 
 def build_lr_pipeline() -> Pipeline:
     """
-    Erstellt scikit-learn Pipeline: TF-IDF Vektorisierung → Logistic Regression.
+    TF-IDF Vektorisierung → Logistic Regression (Softmax, 3 Klassen).
 
-    TF-IDF Parameter (Konstanten oben):
-        max_features = 5000   (Vokabular-Obergrenze, verhindert Overfitting)
-        ngram_range  = (1,2)  (Uni- und Bigramme; "net loss" als Feature)
-        sublinear_tf = True   (log(1 + TF) statt TF — dämpft sehr häufige Terme)
-
-    LR Parameter:
-        C        = 1.0   (Regularisierungsstärke; höher = weniger Regularisierung)
-        solver   = 'lbfgs' (Standard für Mehrklassen, memory-effizient)
-        max_iter = 1000  (Konvergenzsicherung)
-
-    Returns:
-        pipe : sklearn.pipeline.Pipeline (untrainiert)
+    TF-IDF: max_features=5000, ngram_range=(1,2), sublinear_tf=True
+    LR:     C=1.0, solver=lbfgs, max_iter=1000
     """
     tfidf = TfidfVectorizer(
         max_features=TFIDF_MAX_FEATURES,
         ngram_range=TFIDF_NGRAM_RANGE,
-        sublinear_tf=True,      # log(1+TF) — numerisch stabiler bei sehr häufigen Termen
+        sublinear_tf=True,
         strip_accents="unicode",
         lowercase=True,
     )
@@ -304,7 +324,6 @@ def build_lr_pipeline() -> Pipeline:
         C=LR_C,
         max_iter=LR_MAX_ITER,
         solver="lbfgs",
-        # multi_class entfällt ab sklearn 1.5 — lbfgs nutzt automatisch Softmax
         random_state=RANDOM_STATE,
     )
     return Pipeline([("tfidf", tfidf), ("lr", lr)])
@@ -314,63 +333,32 @@ def build_lr_pipeline() -> Pipeline:
 # Evaluation
 # ---------------------------------------------------------------------------
 
-def evaluate(
-    y_true: List[int],
-    y_pred: List[int],
-    model_name: str = "Modell",
-) -> Dict:
+def evaluate(y_true: List[int], y_pred: List[int], model_name: str = "Modell") -> Dict:
     """
-    Berechnet Accuracy, Macro-F1, Confusion Matrix und Classification Report.
-
-    Macro-F1 = ungewichteter Mittelwert der F1-Scores pro Klasse.
-    Bevorzugt gegenüber Micro-F1 weil Datensatz class-imbalanced ist.
-
-    Parameter:
-        y_true     : List[int] — wahre Labels {0, 1, 2}
-        y_pred     : List[int] — vorhergesagte Labels {0, 1, 2}
-        model_name : str       — Bezeichnung für Ausgabe
-
-    Returns:
-        metrics : Dict mit Schlüsseln:
-            'accuracy'      : float ∈ [0, 1]
-            'f1_macro'      : float ∈ [0, 1]
-            'conf_matrix'   : np.ndarray (3×3)
-            'report'        : str (sklearn classification_report)
-            'model_name'    : str
+    Accuracy, Macro-F1, Confusion Matrix, Classification Report.
+    Macro-F1 bevorzugt weil Datensatz class-imbalanced ist.
     """
     _validate_labels(y_true, "y_true")
     _validate_labels(y_pred, "y_pred")
 
     if len(y_true) != len(y_pred):
-        raise ValueError(
-            f"Längen stimmen nicht überein: "
-            f"y_true={len(y_true)}, y_pred={len(y_pred)}"
-        )
+        raise ValueError(f"Längen: y_true={len(y_true)}, y_pred={len(y_pred)}")
 
-    acc = accuracy_score(y_true, y_pred)
-    f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
-    cm = confusion_matrix(y_true, y_pred, labels=[0, 1, 2])
-    report = classification_report(
-        y_true, y_pred,
-        target_names=LABEL_NAMES,
-        zero_division=0,
-    )
-
-    # Plausibilitätscheck: Accuracy muss über Zufalls-Baseline liegen
-    # Zufalls-Baseline bei 3 Klassen: ~33%; bei unserem imbalanced Set: ~59% (majority class)
+    acc    = accuracy_score(y_true, y_pred)
+    f1     = f1_score(y_true, y_pred, average="macro", zero_division=0)
+    cm     = confusion_matrix(y_true, y_pred, labels=[0, 1, 2])
+    report = classification_report(y_true, y_pred, target_names=LABEL_NAMES, zero_division=0)
     majority_baseline = max(Counter(y_true).values()) / len(y_true)
+
     if acc < 0.30:
-        raise RuntimeError(
-            f"{model_name}: Accuracy={acc:.3f} liegt unter 30% — "
-            f"Modell schlechter als Zufallsklassifikator."
-        )
+        raise RuntimeError(f"{model_name}: Accuracy={acc:.3f} unter 30%.")
 
     return {
-        "accuracy": acc,
-        "f1_macro": f1,
-        "conf_matrix": cm,
-        "report": report,
-        "model_name": model_name,
+        "accuracy":          acc,
+        "f1_macro":          f1,
+        "conf_matrix":       cm,
+        "report":            report,
+        "model_name":        model_name,
         "majority_baseline": majority_baseline,
     }
 
@@ -385,32 +373,17 @@ def sentiment_timeseries(
     labels_pred_vader: List[int],
     labels_pred_lr: List[int],
 ) -> Dict:
-    """
-    Erstellt Sentiment-Zeitreihe für die Dashboard-Visualisierung.
-
-    Index = Position im Datensatz (sortiert nach Klasse für Visualisierung).
-    Numerische Kodierung: negative=-1, neutral=0, positive=+1
-
-    Parameter:
-        texts              : List[str]
-        labels_true        : List[int]
-        labels_pred_vader  : List[int]
-        labels_pred_lr     : List[int]
-
-    Returns:
-        ts : Dict mit Arrays für Plotting
-    """
+    """Sentiment-Zeitreihe für Dashboard. Kodierung: neg=-1, neu=0, pos=+1."""
     _validate_texts(texts)
     n = len(texts)
     for arr, name in [
-        (labels_true, "labels_true"),
+        (labels_true,       "labels_true"),
         (labels_pred_vader, "labels_pred_vader"),
-        (labels_pred_lr, "labels_pred_lr"),
+        (labels_pred_lr,    "labels_pred_lr"),
     ]:
         if len(arr) != n:
             raise ValueError(f"{name} hat Länge {len(arr)}, erwartet {n}")
 
-    # Numerische Sentiment-Werte: {0→-1, 1→0, 2→+1}
     def encode(labels):
         return np.array([l - 1 for l in labels], dtype=float)
 
@@ -424,53 +397,40 @@ def sentiment_timeseries(
 
 
 # ---------------------------------------------------------------------------
-# Synthetisches Validierungsbeispiel (manuell nachvollziehbar)
+# Validierungsbeispiel
 # ---------------------------------------------------------------------------
 
 def _run_validation_example() -> None:
-    """
-    Validierungsbeispiel mit prüfbarem Ergebnis.
-
-    Erwartung:
-        "Operating profit rose strongly"  → VADER: positiv (compound > 0.05)
-        "Net loss reported for the year"  → VADER: negativ (compound < -0.05)
-        "The report is scheduled Monday"  → VADER: neutral
-    """
     test_cases = [
-        ("Operating profit rose strongly", 2),      # erwartet: positiv
-        ("Net loss reported for the year", 0),       # erwartet: negativ
-        ("The report is scheduled Monday", 1),       # erwartet: neutral
+        ("Operating profit rose strongly", 2),
+        ("Net loss reported for the year", 0),
+        ("The report is scheduled Monday", 1),
     ]
-    texts_val = [t for t, _ in test_cases]
-    expected  = [e for _, e in test_cases]
-    preds     = vader_predict(texts_val)
-
+    preds = vader_predict([t for t, _ in test_cases])
     for (text, exp), pred in zip(test_cases, preds):
-        status = "OK" if pred == exp else f"FEHLER (erwartet {exp})"
+        status = "OK" if pred == exp else f"FEHLER (erwartet {LABEL_NAMES[exp]})"
         print(f"  [{status}] '{text}' → {LABEL_NAMES[pred]}")
 
 
 if __name__ == "__main__":
-    print("=== Validierungsbeispiel (VADER) ===")
+    print(f"=== Datensatz-Modus: {'Hugging Face' if USE_HUGGINGFACE else 'Fallback'} ===")
+    print("\n=== Validierungsbeispiel (VADER) ===")
     _run_validation_example()
 
     print("\n=== Vollständiger Datensatz-Test ===")
     texts, labels = load_phrasebank()
+    print(f"Samples geladen: {len(texts)}")
+
     X_train, X_test, y_train, y_test = train_test_split(
-        texts, labels,
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE,
-        stratify=labels,
+        texts, labels, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=labels,
     )
 
-    # VADER
-    vader_preds = vader_predict(X_test)
+    vader_preds   = vader_predict(X_test)
     vader_metrics = evaluate(y_test, vader_preds, "VADER")
     print(f"VADER     — Accuracy: {vader_metrics['accuracy']:.3f} | Macro-F1: {vader_metrics['f1_macro']:.3f}")
 
-    # TF-IDF + LR
     pipe = build_lr_pipeline()
     pipe.fit(X_train, y_train)
-    lr_preds = list(pipe.predict(X_test))
+    lr_preds   = list(pipe.predict(X_test))
     lr_metrics = evaluate(y_test, lr_preds, "TF-IDF + LR")
     print(f"TF-IDF+LR — Accuracy: {lr_metrics['accuracy']:.3f} | Macro-F1: {lr_metrics['f1_macro']:.3f}")

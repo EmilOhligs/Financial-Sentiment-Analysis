@@ -8,16 +8,17 @@
 #   python -c "import nltk; nltk.download('vader_lexicon')"
 
 # NLP & Machine Learning
-scikit-learn>=1.3.0
+scikit-learn>=1.5.0
 nltk>=3.8.0
 
 # Numerik & Daten
-numpy>=1.24.0
+numpy>=2.0.0
 pandas>=2.0.0
+pyarrow>=15.0.0
 
 # Visualisierung
 matplotlib>=3.7.0
 
-# Optional: Originaldatensatz von Hugging Face laden
-# (offline-fähige eingebettete Version ist Standard)
-# datasets>=2.14.0
+# Datensatz von Hugging Face laden (optional)
+# USE_HUGGINGFACE = True in financial_sentiment_model.py
+datasets>=2.19.0
