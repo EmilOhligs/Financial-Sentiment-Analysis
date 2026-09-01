@@ -2,6 +2,8 @@
 **NLP-basierter Sentiment-Klassifikator für Finanztexte**  
 VADER (regelbasiert) vs. TF-IDF + Logistic Regression (supervised) — mit 4-Panel-Dashboard
 
+Anwendungskontext: https://www.youtube.com/watch?v=0C4p-D8-Tv8&t=165s
+
 
 ---
 
