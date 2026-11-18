@@ -58,6 +58,17 @@ warnings.filterwarnings("ignore", category=UserWarning)
 #         geeignet für Offline-Entwicklung und schnelle Tests
 USE_HUGGINGFACE: bool = True
 
+# Exakte Datenquelle — wird in Dashboard, results.json und README genannt.
+HF_PARQUET_URL: str = (
+    "https://huggingface.co/datasets/FinanceMTEB/financial_phrasebank"
+    "/resolve/main/data/train-00000-of-00001.parquet"
+)
+DATASET_NAME: str = (
+    "Financial PhraseBank via FinanceMTEB/financial_phrasebank (train split)"
+    if USE_HUGGINGFACE else
+    "embedded offline sample (63 sentences)"
+)
+
 # ---------------------------------------------------------------------------
 # Konstanten — alle benannt, keine hart codierten Magic Numbers
 # ---------------------------------------------------------------------------
@@ -213,11 +224,7 @@ def _load_from_huggingface() -> Tuple[List[str], List[int]]:
     """
     try:
         import pandas as pd
-        url = (
-            "https://huggingface.co/datasets/FinanceMTEB/financial_phrasebank"
-            "/resolve/main/data/train-00000-of-00001.parquet"
-            )
-        df = pd.read_parquet(url)
+        df = pd.read_parquet(HF_PARQUET_URL)
         print("Spalten:", list(df.columns))
         print("Erste Zeile:", df.iloc[0].to_dict())
 

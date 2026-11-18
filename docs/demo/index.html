@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Financial sentiment: two models, one sentence</title>
+<link rel="icon" href="data:,">
+<meta name="description" content="Type a sentence from financial news and compare a general-purpose sentiment lexicon with a classifier trained on financial text. Runs entirely in your browser.">
+<style>
+  :root {
+    --ink: #16171a; --muted: #5a5f6b; --line: #dcdde3; --paper: #ffffff; --wash: #f0f0f3;
+    --navy: #1c415c; --neg: #d04848; --neu: #7d8089; --pos: #2f9e6b;
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: transparent; }
+  body { font: 16px/1.5 var(--font); color: var(--ink); padding: 4px; }
+  .demo { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 24px; }
+  .eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--navy); font-weight: 700; margin: 0 0 6px; }
+  h1 { font-size: 22px; line-height: 1.25; margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 18px; font-size: 15px; }
+  label.input-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  textarea {
+    width: 100%; min-height: 64px; resize: vertical; font: inherit; color: inherit;
+    padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--wash);
+  }
+  textarea:focus { outline: 2px solid var(--navy); outline-offset: 1px; background: #fff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 20px; }
+  .chips span { font-size: 12px; color: var(--muted); align-self: center; margin-right: 2px; }
+  .chip {
+    font: inherit; font-size: 13px; border: 1px solid var(--line); background: #fff; color: var(--ink);
+    border-radius: 999px; padding: 5px 12px; cursor: pointer; text-align: left;
+  }
+  .chip:hover, .chip:focus-visible { border-color: var(--navy); color: var(--navy); outline: none; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } .demo { padding: 18px; } }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .card h2 { font-size: 13px; margin: 0; font-weight: 700; }
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 2px; font-weight: 400; }
+  .verdict { display: flex; align-items: baseline; gap: 10px; }
+  .verdict b { font-size: 26px; text-transform: capitalize; line-height: 1; }
+  .verdict small { color: var(--muted); font-size: 13px; }
+  .negative { color: var(--neg); } .neutral { color: var(--neu); } .positive { color: var(--pos); }
+  .scale { position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, #f3d3d3, #ececef 45%, #ececef 55%, #cfe9dc); }
+  .scale .zone { position: absolute; top: -3px; bottom: -3px; left: 47.5%; width: 5%; border-left: 1px dashed #aaa; border-right: 1px dashed #aaa; }
+  .scale .dot { position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--ink); border: 3px solid #fff; box-shadow: 0 0 0 1px var(--ink); transition: left .25s; }
+  .scale-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .bars { display: grid; grid-template-columns: 70px 1fr 42px; gap: 6px 8px; align-items: center; font-size: 13px; }
+  .bar { height: 10px; border-radius: 5px; background: var(--wash); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 5px; transition: width .25s; }
+  .bars .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .why { font-size: 12px; color: var(--muted); margin: 0 0 6px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { font-size: 13px; border-radius: 6px; padding: 2px 8px; background: var(--wash); }
+  .tag em { font-style: normal; font-size: 11px; margin-left: 5px; opacity: .8; font-variant-numeric: tabular-nums; }
+  .tag.pos { background: #dff1e8; } .tag.neg { background: #f7dddd; }
+  .empty { font-size: 13px; color: var(--muted); font-style: italic; }
+  .foot { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
+  .foot strong { color: var(--ink); font-weight: 600; }
+  .foot a { color: var(--navy); }
+  .error { color: var(--neg); font-size: 14px; }
+</style>
+</head>
+<body>
+<main class="demo" aria-labelledby="title">
+  <p class="eyebrow">[ Live demo ]</p>
+  <h1 id="title">Two models read the same sentence</h1>
+  <p class="lede">A general-purpose sentiment dictionary and a classifier trained on financial news. Type a line from an earnings release or pick an example.</p>
+
+  <label class="input-label" for="text">Your sentence</label>
+  <textarea id="text" maxlength="600" spellcheck="false">The group faces significant headwinds in its main markets.</textarea>
+
+  <div class="chips" role="group" aria-label="Example sentences">
+    <span>Try:</span>
+    <button class="chip" type="button">The group faces significant headwinds in its main markets.</button>
+    <button class="chip" type="button">Net loss narrowed to EUR 2 million from EUR 9 million.</button>
+    <button class="chip" type="button">The bank cut its full-year guidance.</button>
+    <button class="chip" type="button">Management successfully avoided a larger writedown.</button>
+    <button class="chip" type="button">Revenue was flat compared with last year.</button>
+    <button class="chip" type="button">Operating profit rose to EUR 14 million.</button>
+  </div>
+
+  <div class="grid" aria-live="polite">
+    <section class="card" aria-labelledby="v-h">
+      <h2 id="v-h">VADER<div class="sub">General-purpose lexicon, no training</div></h2>
+      <div class="verdict"><b id="v-label">–</b><small id="v-score"></small></div>
+      <div>
+        <div class="scale" aria-hidden="true"><div class="zone"></div><div class="dot" id="v-dot" style="left:50%"></div></div>
+        <div class="scale-labels"><span>−1 negative</span><span>neutral band ±0.05</span><span>+1 positive</span></div>
+      </div>
+      <div>
+        <p class="why">Words it found in its dictionary</p>
+        <div class="tags" id="v-words"></div>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="l-h">
+      <h2 id="l-h">TF-IDF + logistic regression<div class="sub">Trained on labeled financial news sentences</div></h2>
+      <div class="verdict"><b id="l-label">–</b><small id="l-conf"></small></div>
+      <div class="bars" id="l-bars"></div>
+      <div>
+        <p class="why" id="l-why">Terms that pushed it toward this label</p>
+        <div class="tags" id="l-terms"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="foot">
+    <div id="metrics"></div>
+    <div><strong>Private by design:</strong> both models run in your browser. Nothing you type is sent anywhere.</div>
+    <div>VADER lexicon: Hutto &amp; Gilbert (2014), MIT license. Classifier trained on the Financial PhraseBank (Malo et al., 2014), CC BY-NC-SA 3.0. Example sentences are written for this demo.
+      <a href="https://github.com/EmilOhligs/Financial-Sentiment-Analysis" target="_blank" rel="noopener">Code on GitHub</a>.</div>
+  </div>
+</main>
+
+<script src="models.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const text = $("text");
+  const pct = (x) => Math.round(x * 100) + "%";
+  let model = null;
+
+  function tag(word, value, cls) {
+    const el = document.createElement("span");
+    el.className = "tag " + cls;
+    el.textContent = word;
+    const em = document.createElement("em");
+    em.textContent = (value > 0 ? "+" : "") + value.toFixed(2);
+    el.appendChild(em);
+    return el;
+  }
+  function empty(msg) {
+    const el = document.createElement("span");
+    el.className = "empty";
+    el.textContent = msg;
+    return el;
+  }
+
+  function render() {
+    if (!model) return;
+    const s = text.value.trim();
+
+    // VADER
+    const v = FSA.vader(s, model.vader.lexicon);
+    const vl = FSA.vaderLabel(v.compound, model);
+    $("v-label").textContent = s ? vl : "–";
+    $("v-label").className = s ? vl : "";
+    $("v-score").textContent = s ? "compound " + v.compound.toFixed(2) : "";
+    $("v-dot").style.left = (50 + v.compound * 50) + "%";
+    const vw = $("v-words");
+    vw.replaceChildren();
+    const scored = v.tokens.filter((t) => t.valence !== 0);
+    if (!s) vw.appendChild(empty("Type a sentence above."));
+    else if (!scored.length) vw.appendChild(empty("None of these words is in its dictionary, so it reads the sentence as neutral."));
+    else scored.forEach((t) => vw.appendChild(tag(t.word, t.valence, t.valence > 0 ? "pos" : "neg")));
+
+    // Logistic regression
+    const l = FSA.logreg(s, model);
+    const bars = $("l-bars");
+    bars.replaceChildren();
+    const colors = { negative: "var(--neg)", neutral: "var(--neu)", positive: "var(--pos)" };
+    model.labels.forEach((name, k) => {
+      const lab = document.createElement("span"); lab.textContent = name; lab.className = name;
+      const bar = document.createElement("div"); bar.className = "bar";
+      const fill = document.createElement("i"); fill.style.width = pct(l.proba[k]); fill.style.background = colors[name];
+      bar.appendChild(fill);
+      const num = document.createElement("span"); num.className = "num"; num.textContent = pct(l.proba[k]);
+      bars.append(lab, bar, num);
+    });
+    $("l-label").textContent = s ? l.label : "–";
+    $("l-label").className = s ? l.label : "";
+    $("l-conf").textContent = s ? pct(Math.max(...l.proba)) + " probability" : "";
+    const lt = $("l-terms");
+    lt.replaceChildren();
+    const push = l.terms.filter((t) => t.push > 0).slice(0, 5);
+    if (!s) lt.appendChild(empty("Type a sentence above."));
+    else if (!l.known) lt.appendChild(empty("None of these words appeared in its training data. It falls back to the most common pattern."));
+    else if (!push.length) lt.appendChild(empty("No single term stands out."));
+    else push.forEach((t) => lt.appendChild(tag(t.term, t.push, l.label === "negative" ? "neg" : l.label === "positive" ? "pos" : "")));
+    $("l-why").textContent = "Terms that pushed it toward " + (s ? l.label : "this label");
+    resize();
+  }
+
+  // Tell an embedding page (Ghost HTML card) how tall the demo is.
+  function resize() {
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: "fsa-demo-height", height: document.documentElement.scrollHeight }, "*");
+    }
+  }
+  window.addEventListener("resize", resize);
+
+  let timer = 0;
+  text.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(render, 120); });
+  document.querySelectorAll(".chip").forEach((b) => b.addEventListener("click", () => { text.value = b.textContent; render(); }));
+
+  fetch("model.json")
+    .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then((m) => {
+      model = m;
+      const mt = m.metrics;
+      $("metrics").innerHTML = "";
+      const strong = document.createElement("strong");
+      strong.textContent = "Held-out test set (" + mt.test_size.toLocaleString("en-US") + " sentences): ";
+      $("metrics").append(strong, document.createTextNode(
+        "VADER " + pct(mt.vader.accuracy) + " accuracy, trained model " + pct(mt.lr.accuracy) + "."));
+      render();
+    })
+    .catch(() => {
+      document.querySelector(".grid").replaceChildren(
+        Object.assign(document.createElement("p"), { className: "error", textContent: "The model file could not be loaded. Please reload the page." }));
+      resize();
+    });
+})();
+</script>
+</body>
+</html>
