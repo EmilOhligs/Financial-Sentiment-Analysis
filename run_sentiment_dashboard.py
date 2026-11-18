@@ -26,6 +26,7 @@ from financial_sentiment_model import (
     evaluate,
     sentiment_timeseries,
     LABEL_NAMES,
+    DATASET_NAME,
     TEST_SIZE,
     RANDOM_STATE,
 )
@@ -97,13 +98,14 @@ def run_pipeline():
     lr_preds   = list(pipe.predict(X_test))
     lr_metrics = evaluate(y_test, lr_preds, "TF-IDF + LogReg")
 
-    # Sentiment-Zeitreihe (gesamter Datensatz, sortiert nach True-Label)
-    sort_idx   = np.argsort(labels)
+    # Panel 4: nur Test-Set (keine Trainingsdaten), sortiert nach True-Label.
+    # Vorhersagen werden mit derselben Reihenfolge umsortiert wie die Labels.
+    sort_idx   = np.argsort(y_test, kind="stable")
     ts_data    = sentiment_timeseries(
-        [texts[i] for i in sort_idx],
-        [labels[i] for i in sort_idx],
-        vader_predict(texts),          # VADER auf gesamtem Set
-        list(pipe.predict(texts)),     # LR auf gesamtem Set
+        [X_test[i] for i in sort_idx],
+        [y_test[i] for i in sort_idx],
+        [vader_preds[i] for i in sort_idx],
+        [lr_preds[i] for i in sort_idx],
     )
 
     return {
@@ -222,7 +224,7 @@ def plot_confusion_matrix(ax, cm: np.ndarray, title: str, color: str) -> None:
 
 def plot_sentiment_timeseries(ax, ts: dict) -> None:
     """
-    Panel 4: Sentiment-Zeitreihe über alle Samples (sortiert nach True Label).
+    Panel 4: Vorhersagen auf dem Test-Set, sortiert nach True Label.
 
     Numerische Kodierung: negative=-1, neutral=0, positive=+1
     Zeigt True Labels als Scatter + VADER/LR als gleitenden Mittelwert.
@@ -262,8 +264,8 @@ def plot_sentiment_timeseries(ax, ts: dict) -> None:
     ax.set_ylim(-1.3, 1.3)
     ax.set_yticks([-1, 0, 1])
     ax.set_yticklabels(["Negative", "Neutral", "Positive"], fontsize=8)
-    ax.set_xlabel("Sample Index (sorted by true label)", fontsize=9)
-    ax.set_title("Sentiment Time Series — All Samples", fontsize=10, pad=8)
+    ax.set_xlabel("Test sample (sorted by true label)", fontsize=9)
+    ax.set_title("Predictions on the Test Set, Sorted by True Label", fontsize=10, pad=8)
 
     legend_patches = [
         mpatches.Patch(color=CLR_NEG, label="True: Negative"),
@@ -318,7 +320,7 @@ def build_dashboard(data: dict) -> plt.Figure:
 
     # Footer mit Datensatz-Info
     footer = (
-        f"Dataset: Financial PhraseBank (sentences_allagree)  "
+        f"Dataset: {DATASET_NAME}  "
         f"·  N={data['n_total']} samples  "
         f"·  Train/Test = {data['n_train']}/{data['n_test']}  "
         f"·  Labels: 0=negative, 1=neutral, 2=positive"
@@ -339,7 +341,7 @@ def print_report(data: dict) -> None:
     print(f"\n{sep}")
     print("  Financial Sentiment Analysis — Report")
     print(sep)
-    print(f"  Dataset   : Financial PhraseBank (sentences_allagree)")
+    print(f"  Dataset   : {DATASET_NAME}")
     print(f"  Samples   : {data['n_total']} total | "
           f"Train {data['n_train']} | Test {data['n_test']}")
     print(sep)
