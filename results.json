@@ -1,0 +1,191 @@
+{
+  "generated_at": "2026-11-18T19:49:57+00:00",
+  "environment": {
+    "python": "3.10.11",
+    "scikit_learn": "1.7.2",
+    "nltk": "3.10.4"
+  },
+  "dataset": {
+    "name": "Financial PhraseBank via FinanceMTEB/financial_phrasebank (train split)",
+    "source_url": "https://huggingface.co/datasets/FinanceMTEB/financial_phrasebank/resolve/main/data/train-00000-of-00001.parquet",
+    "sha256": "0b804f396941ef460744ca386369f88e0d6b2015a367beb7696639539cab6c56",
+    "n_total": 1264,
+    "distribution": {
+      "negative": 165,
+      "neutral": 779,
+      "positive": 320
+    }
+  },
+  "split": {
+    "method": "stratified random split",
+    "test_size": 0.2,
+    "random_state": 42,
+    "n_train": 1011,
+    "n_test": 253,
+    "test_distribution": {
+      "negative": 33,
+      "neutral": 156,
+      "positive": 64
+    }
+  },
+  "majority_baseline": {
+    "class": "neutral",
+    "accuracy": 0.616600790513834
+  },
+  "vader": {
+    "accuracy": 0.5533596837944664,
+    "f1_macro": 0.4578445569381979,
+    "per_class": {
+      "negative": {
+        "precision": 0.35294117647058826,
+        "recall": 0.18181818181818182,
+        "f1": 0.24,
+        "support": 33
+      },
+      "neutral": {
+        "precision": 0.7603305785123967,
+        "recall": 0.5897435897435898,
+        "f1": 0.6642599277978339,
+        "support": 156
+      },
+      "positive": {
+        "precision": 0.3652173913043478,
+        "recall": 0.65625,
+        "f1": 0.4692737430167598,
+        "support": 64
+      }
+    },
+    "confusion_matrix": [
+      [
+        6,
+        8,
+        19
+      ],
+      [
+        10,
+        92,
+        54
+      ],
+      [
+        1,
+        21,
+        42
+      ]
+    ],
+    "confusion_matrix_note": "rows = true label, columns = predicted; order negative, neutral, positive"
+  },
+  "tfidf_lr": {
+    "accuracy": 0.8300395256916996,
+    "f1_macro": 0.743150458434248,
+    "per_class": {
+      "negative": {
+        "precision": 1.0,
+        "recall": 0.42424242424242425,
+        "f1": 0.5957446808510638,
+        "support": 33
+      },
+      "neutral": {
+        "precision": 0.8031088082901554,
+        "recall": 0.9935897435897436,
+        "f1": 0.8882521489971347,
+        "support": 156
+      },
+      "positive": {
+        "precision": 0.8913043478260869,
+        "recall": 0.640625,
+        "f1": 0.7454545454545455,
+        "support": 64
+      }
+    },
+    "confusion_matrix": [
+      [
+        14,
+        15,
+        4
+      ],
+      [
+        0,
+        155,
+        1
+      ],
+      [
+        0,
+        23,
+        41
+      ]
+    ],
+    "confusion_matrix_note": "rows = true label, columns = predicted; order negative, neutral, positive"
+  },
+  "export_check": {
+    "label_mismatches": 0,
+    "max_probability_diff": 3.7398358160301015e-06
+  },
+  "probes": [
+    {
+      "sentence": "The group faces significant headwinds in its main markets.",
+      "vader_compound": 0.2023,
+      "vader_label": "positive",
+      "lr_label": "neutral",
+      "lr_proba": {
+        "negative": 0.085,
+        "neutral": 0.6378,
+        "positive": 0.2772
+      }
+    },
+    {
+      "sentence": "Management successfully avoided a larger writedown.",
+      "vader_compound": 0.2023,
+      "vader_label": "positive",
+      "lr_label": "neutral",
+      "lr_proba": {
+        "negative": 0.0847,
+        "neutral": 0.8008,
+        "positive": 0.1145
+      }
+    },
+    {
+      "sentence": "Net loss narrowed to EUR 2 million from EUR 9 million.",
+      "vader_compound": -0.3182,
+      "vader_label": "negative",
+      "lr_label": "positive",
+      "lr_proba": {
+        "negative": 0.1424,
+        "neutral": 0.1326,
+        "positive": 0.725
+      }
+    },
+    {
+      "sentence": "The bank cut its full-year guidance.",
+      "vader_compound": -0.2732,
+      "vader_label": "negative",
+      "lr_label": "neutral",
+      "lr_proba": {
+        "negative": 0.1142,
+        "neutral": 0.6038,
+        "positive": 0.2821
+      }
+    },
+    {
+      "sentence": "Revenue was flat compared with last year.",
+      "vader_compound": 0.0,
+      "vader_label": "neutral",
+      "lr_label": "positive",
+      "lr_proba": {
+        "negative": 0.144,
+        "neutral": 0.3541,
+        "positive": 0.5019
+      }
+    },
+    {
+      "sentence": "Operating profit rose to EUR 14 million.",
+      "vader_compound": 0.4404,
+      "vader_label": "positive",
+      "lr_label": "positive",
+      "lr_proba": {
+        "negative": 0.0482,
+        "neutral": 0.0727,
+        "positive": 0.8791
+      }
+    }
+  ]
+}
